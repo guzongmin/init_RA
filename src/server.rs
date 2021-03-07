@@ -19,7 +19,8 @@ impl Greeter for MyGreeter {
         println!("Got a request: {:?}", request);
 
         let reply = hello_world::HelloReply {
-            message: format!("Hello {}!", request.into_inner().name).into(),
+            // message: format!("Hello {}!", request.into_inner().name).into(),
+            message: "ff-2a-f9-29-ce-6d-95-04-93-70-6e-83-64-1b-d6-0c".into(),
         };
 
         Ok(Response::new(reply))

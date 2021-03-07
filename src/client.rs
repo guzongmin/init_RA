@@ -20,7 +20,7 @@ pub mod hello_world {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the configuration from initfs
-    const IMAGE_CONFIG_FILE: &str = "image_config.json";
+    const IMAGE_CONFIG_FILE: &str = "/etc/image_config.json";
     let image_config = load_config(IMAGE_CONFIG_FILE)?;
 
     // Get the MAC of Occlum.json.protected file
