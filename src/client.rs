@@ -1,10 +1,11 @@
 extern crate libc;
+extern crate openssl;
 extern crate serde;
 extern crate serde_json;
 
 use libc::syscall;
+use openssl::rsa::{Padding, Rsa};
 use serde::Deserialize;
-
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
@@ -20,7 +21,8 @@ pub mod hello_world {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the configuration from initfs
-    const IMAGE_CONFIG_FILE: &str = "/etc/image_config.json";
+    // const IMAGE_CONFIG_FILE: &str = "/etc/image_config.json";
+    const IMAGE_CONFIG_FILE: &str = "image_config.json";
     let image_config = load_config(IMAGE_CONFIG_FILE)?;
 
     // Get the MAC of Occlum.json.protected file
@@ -39,18 +41,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             key
         }
         None => {
+            let rsa = Rsa::generate(2048).unwrap();
+
             let mut client = GreeterClient::connect("http://[::1]:50051").await?;
 
             let request = tonic::Request::new(HelloRequest {
                 name: image_config.occlum_json_mac,
+                pubkey: rsa.public_key_to_pem().unwrap(),
             });
 
             let response = client.say_hello(request).await?;
 
-            println!("key={:?}", response.get_ref().message);
-            let mut key: sgx_key_128bit_t = Default::default();
-            parse_str_to_bytes(&response.get_ref().message, &mut key)?;
-            key
+            let mut image_key = vec![0 as u8; rsa.size() as usize];
+            let image_key_size = rsa.private_decrypt(
+                &response.get_ref().encrypted_key,
+                &mut image_key,
+                Padding::PKCS1,
+            );
+
+            image_key.resize_with(image_key_size.unwrap(), Default::default);
+
+            let mut image_raw_key: sgx_key_128bit_t = Default::default();
+            parse_str_to_bytes(std::str::from_utf8(&image_key).unwrap(), &mut image_raw_key)?;
+            image_raw_key
         }
     };
 
