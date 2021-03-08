@@ -19,7 +19,9 @@ impl Greeter for MyGreeter {
         &self,
         request: Request<HelloRequest>,
     ) -> Result<Response<HelloReply>, Status> {
-        println!("Got a request: {:?}", request.get_ref().name);
+        println!("Got a request: {:?}", request.get_ref().image_mac);
+
+        //Todo: verify the quote and the pubkey Hash
 
         let rsa = Rsa::public_key_from_pem(&request.get_ref().pubkey).unwrap();
 

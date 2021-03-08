@@ -6,8 +6,9 @@ service Greeter {
 }
 
 message HelloRequest {
-    string name = 1;
+    string image_mac = 1;
     bytes pubkey = 2;
+    bytes quote = 3;
 }
 
 message HelloReply {

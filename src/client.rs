@@ -21,8 +21,8 @@ pub mod hello_world {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the configuration from initfs
-    // const IMAGE_CONFIG_FILE: &str = "/etc/image_config.json";
-    const IMAGE_CONFIG_FILE: &str = "image_config.json";
+    const IMAGE_CONFIG_FILE: &str = "/etc/image_config.json";
+    // const IMAGE_CONFIG_FILE: &str = "image_config.json";
     let image_config = load_config(IMAGE_CONFIG_FILE)?;
 
     // Get the MAC of Occlum.json.protected file
@@ -45,9 +45,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut client = GreeterClient::connect("http://[::1]:50051").await?;
 
+            // Todo: get correct quote size
+            let quote_size = 512;
+
             let request = tonic::Request::new(HelloRequest {
-                name: image_config.occlum_json_mac,
+                image_mac: image_config.occlum_json_mac,
                 pubkey: rsa.public_key_to_pem().unwrap(),
+                // Todo: generate the quote with pubkey Hash
+                quote: vec![0 as u8; quote_size],
             });
 
             let response = client.say_hello(request).await?;
