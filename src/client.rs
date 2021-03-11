@@ -1,11 +1,17 @@
+#![feature(vec_into_raw_parts)]
 extern crate libc;
+extern crate nix;
 extern crate openssl;
 extern crate serde;
 extern crate serde_json;
 
 use libc::syscall;
+use nix::fcntl::{self, OFlag};
+use nix::sys::stat::Mode;
+use nix::{ioctl_read, ioctl_readwrite};
 use openssl::rsa::{Padding, Rsa};
 use serde::Deserialize;
+use sha2::{Digest, Sha512};
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
@@ -42,17 +48,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => {
             let rsa = Rsa::generate(2048).unwrap();
+            let pubkey = rsa.public_key_to_pem().unwrap();
+
+            // same for Sha512
+            let mut hasher = Sha512::new();
+            hasher.update(pubkey.clone());
+            let result = hasher.finalize();
+
+            let mut report_data = Box::new(SgxReportData {
+                d: [0; SGX_REPORT_DATA_SIZE],
+            });
+            report_data.d.copy_from_slice(result.as_slice());
+
+            println!("report_data {:?}", report_data);
+
+            let sgx_file = fcntl::open("/dev/sgx", OFlag::O_RDONLY, Mode::S_IRWXU)
+                .expect("can't read sgx device");
+
+            // Get correct quote size
+            let mut quote_size: u32 = 0;
+            unsafe {
+                get_quote_size(sgx_file, &mut quote_size).unwrap();
+            }
+
+            let quote_buf = vec![0 as u8; quote_size as usize];
+            let (quote_buf_ptr, quote_buf_len, quote_buf_cap) = quote_buf.into_raw_parts();
+
+            let quote_len = Box::new(quote_size);
+            let mut quote = sgxioc_gen_dcap_quote_arg {
+                report_data: Box::into_raw(report_data),
+                quote_len: Box::into_raw(quote_len),
+                quote_buf: quote_buf_ptr,
+            };
+
+            unsafe {
+                gen_quote(sgx_file, &mut quote).unwrap();
+            }
 
             let mut client = GreeterClient::connect("http://[::1]:50051").await?;
-
-            // Todo: get correct quote size
-            let quote_size = 512;
-
             let request = tonic::Request::new(HelloRequest {
                 image_mac: image_config.occlum_json_mac,
-                pubkey: rsa.public_key_to_pem().unwrap(),
-                // Todo: generate the quote with pubkey Hash
-                quote: vec![0 as u8; quote_size],
+                pubkey: pubkey,
+                quote: unsafe { Vec::from_raw_parts(quote_buf_ptr, quote_buf_len, quote_buf_cap) },
             });
 
             let response = client.say_hello(request).await?;
@@ -92,6 +129,7 @@ type sgx_aes_gcm_128bit_tag_t = [u8; 16];
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 struct ImageConfig {
+    image_type: String,
     occlum_json_mac: String,
     #[serde(default)]
     key: Option<String>,
@@ -138,3 +176,22 @@ impl<'a> fmt::Display for InitError<'a> {
         self.0.fmt(f)
     }
 }
+
+pub const SGX_REPORT_DATA_SIZE: usize = 64;
+#[derive(Debug)]
+pub struct SgxReportData {
+    pub d: [u8; SGX_REPORT_DATA_SIZE],
+}
+
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+pub struct sgxioc_gen_dcap_quote_arg {
+    pub report_data: *mut SgxReportData,
+    pub quote_len: *mut u32,
+    pub quote_buf: *mut u8,
+}
+
+// #define SGXIOC_GET_DCAP_QUOTE_SIZE _IOR('s', 7, uint32_t)
+ioctl_read!(get_quote_size, b's', 7, u32);
+// #define SGXIOC_GEN_DCAP_QUOTE _IOWR('s', 8, sgxioc_gen_dcap_quote_arg_t)
+ioctl_readwrite!(gen_quote, b's', 8, sgxioc_gen_dcap_quote_arg);
